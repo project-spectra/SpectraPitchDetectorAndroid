@@ -1,6 +1,11 @@
 package org.eu.transfusion.spectrapitchdetector;
 
 import android.os.AsyncTask;
+import be.tarsos.dsp.AudioDispatcher;
+import be.tarsos.dsp.io.android.AudioDispatcherFactory;
+import be.tarsos.dsp.pitch.PitchDetectionHandler;
+import be.tarsos.dsp.pitch.PitchProcessor;
+import be.tarsos.dsp.pitch.PitchProcessor.PitchEstimationAlgorithm;
 
 /**
  * https://stackoverflow.com/questions/9963691/android-asynctask-sending-callbacks-to-ui
@@ -8,6 +13,11 @@ import android.os.AsyncTask;
  */
 
 public class PitchDetector {
+
+    private static final int SAMPLE_RATE = 22050;
+    private static final int BUFFER_SIZE = 1024 * 4;
+    private static final int OVERLAP = 768 * 4;
+    private static final int MIN_ITEMS_COUNT = 15;
 
     private static class ProgressUpdateInfo {
         public final float pitchHz;
@@ -27,6 +37,9 @@ public class PitchDetector {
      */
     public static class PitchDetectorAsyncTask extends AsyncTask<Void, ProgressUpdateInfo, Void> {
 
+        private AudioDispatcher audioDispatcher;
+
+        // the interface meant to pass data back to the nativescript instance
         private OnPitchDetectionListener listener;
 //        private boolean running;
 
@@ -42,14 +55,45 @@ public class PitchDetector {
 
         @Override
         protected Void doInBackground(Void... voids) {
-            while(!isCancelled()) {
+
+            PitchDetectionHandler pitchDetectionHandler = (pitchDetectionResult, audioEvent) -> {
+
+                if (isCancelled()) {
+                    stopAudioDispatcher();
+                    return;
+                }
+
+                /*if (!IS_RECORDING) {
+                    IS_RECORDING = true;
+                    publishProgress();
+                }*/
+
+//                float pitch = pitchDetectionResult.getPitch();
+
+                publishProgress(new ProgressUpdateInfo(pitchDetectionResult.getPitch(),
+                        pitchDetectionResult.getProbability(), pitchDetectionResult.isPitched()));
+
+            };
+
+            PitchProcessor pitchProcessor = new PitchProcessor(PitchEstimationAlgorithm.FFT_YIN,
+                    SAMPLE_RATE,
+                    BUFFER_SIZE, pitchDetectionHandler);
+
+            audioDispatcher = AudioDispatcherFactory.fromDefaultMicrophone(SAMPLE_RATE,
+                    BUFFER_SIZE, OVERLAP);
+
+            audioDispatcher.addAudioProcessor(pitchProcessor);
+
+            audioDispatcher.run();
+
+            /*while(!isCancelled()) {
                 try {
                     Thread.sleep(3000);
                     publishProgress(new ProgressUpdateInfo(220.4f, 0.8f, true));
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
-            }
+            }*/
             return null;
         }
 
@@ -66,6 +110,18 @@ public class PitchDetector {
             // execution of result of Long time consuming operation
 //            progressDialog.dismiss();
 //            finalResult.setText(result);
+        }
+
+        @Override
+        protected void onCancelled(Void result) {
+            stopAudioDispatcher();
+        }
+
+        private void stopAudioDispatcher() {
+            if (audioDispatcher != null && !audioDispatcher.isStopped()) {
+                audioDispatcher.stop();
+//                IS_RECORDING = false;
+            }
         }
 
     }
